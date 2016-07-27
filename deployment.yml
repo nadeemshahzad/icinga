@@ -1,0 +1,57 @@
+--- 
+ - hosts: all
+   user: ubuntu
+   sudo: True
+   vars:
+         MySQL_root_pass: root
+         icinga_db: icinga
+         icinga_cgi: icinga
+   tasks:  
+     - name: set debconf configuration
+       debconf: "name={{ item.name }} question={{ item.question }} value={{ item.value }} vtype={{ item.vtype }}"
+       with_items:
+          - { name: 'mysql-server', question: 'mysql-server/root_password', value: "{{ MySQL_root_pass }}", vtype: 'password' }
+          - { name: 'mysql-server', question: 'mysql-server/root_password_again', value: "{{ MySQL_root_pass }}", vtype: 'password' }
+          - { name: 'icinga-idoutils', question: 'icinga-idoutils/database-type', value: 'mysql', vtype: 'select' }
+          - { name: 'icinga-idoutils', question: 'icinga-idoutils/mysql/admin-pass', value: "{{ MySQL_root_pass }}", vtype: 'password' }
+          - { name: 'icinga-idoutils', question: 'icinga-idoutils/db/dbname', value: "{{ icinga_db }}", vtype: 'string' }
+          - { name: 'icinga-idoutils', question: 'icinga-idoutils/mysql/app-pass', value: "{{ MySQL_root_pass }}", vtype: 'password' }
+          - { name: 'icinga-idoutils', question: 'icinga-idoutils/mysql/app-password-confirm', value: "{{ MySQL_root_pass }}", vtype: 'password' }     
+          - { name: 'icinga-cgi', question: 'icinga/adminpassword', value: "{{ icinga_cgi }}", vtype: 'password' }     
+          - { name: 'icinga-cgi', question: 'icinga/adminpassword-repeat', value: "{{ icinga_cgi }}", vtype: 'password' }     
+     - name: Add icinga PPA
+       apt_repository: repo='ppa:formorer/icinga'
+     - name: Install MySQL
+       apt: name={{ item }} update-cache=yes state=present
+       with_items:
+         - mysql-server
+         - mysql-client
+     - name: Install icinga
+       apt: name={{ item }} state=present
+       with_items:
+         - libdbd-mysql 
+         - icinga 
+         - icinga-doc 
+         - icinga-idoutils
+         - nagios-nrpe-server
+         - nagios-nrpe-plugin
+       ignore_errors: True
+       retries: 1
+     - name: Add Apache user to Nagios group
+       user: name=www-data groups=nagios 
+     - name: Enable idomod module
+       copy: src=/usr/share/doc/icinga-idoutils/examples/idoutils.cfg-sample dest=/etc/icinga/modules/idoutils.cfg 
+     - lineinfile: dest=/etc/default/icinga regexp='IDO2DB=no' line='IDO2DB=yes'
+     - template: src=host-apache-mysql.cfg.j2 dest=/etc/icinga/objects/host-apache-mysql.cfg
+     - name: Restart services
+       ping:
+       notify: 
+        - restart ido2b
+        - restart icinga
+     - shell: project-crossover/docker-installation.sh
+
+   handlers:
+       - name: restart ido2db
+         service: name=ido2db state=restarted
+       - name: restart icinga
+         service: name=icinga state=restarted
